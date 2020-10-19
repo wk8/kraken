@@ -135,7 +135,12 @@ func IsNetworkError(err error) bool {
 
 type sendOptions struct {
 	body          io.Reader
+	// timeout is the total timeout for the whole exchange (from dial to finishing reading the body).
 	timeout       time.Duration
+	// dialerTimeout limits the time spent establishing the TCP connection (if a new one is needed).
+	dialerTimeout time.Duration
+	// responseHeaderTimeout limits the time spent reading the headers of the response.
+	responseHeaderTimeout time.Duration
 	acceptedCodes map[int]bool
 	headers       map[string]string
 	redirect      func(req *http.Request, via []*http.Request) error
