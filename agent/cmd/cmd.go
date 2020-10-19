@@ -16,6 +16,7 @@ package cmd
 import (
 	"flag"
 	"fmt"
+	"github.com/uber/kraken/nginx"
 	"net/http"
 	"time"
 
@@ -28,7 +29,6 @@ import (
 	"github.com/uber/kraken/lib/torrent/networkevent"
 	"github.com/uber/kraken/lib/torrent/scheduler"
 	"github.com/uber/kraken/metrics"
-	"github.com/uber/kraken/nginx"
 	"github.com/uber/kraken/utils/configutil"
 	"github.com/uber/kraken/utils/log"
 	"github.com/uber/kraken/utils/netutil"
@@ -223,13 +223,18 @@ func Run(flags *Flags, opts ...Option) {
 
 	go heartbeat(stats)
 
-	log.Fatal(nginx.Run(config.Nginx, map[string]interface{}{
+	wkpo := nginx.Run(config.Nginx, map[string]interface{}{
 		"allowed_cidrs": config.AllowedCidrs,
 		"port":          flags.AgentRegistryPort,
 		"registry_server": nginx.GetServer(
 			config.Registry.Docker.HTTP.Net, config.Registry.Docker.HTTP.Addr),
 		"registry_backup": config.RegistryBackup},
-		nginx.WithTLS(config.TLS)))
+		nginx.WithTLS(config.TLS))
+	if wkpo != nil {
+		log.Errorf("wkpo gonna sleep: %v", wkpo)
+		time.Sleep(1 * time.Hour)
+		log.Fatal(wkpo)
+	}
 }
 
 // heartbeat periodically emits a counter metric which allows us to monitor the
