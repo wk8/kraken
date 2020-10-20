@@ -19,8 +19,10 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/pressly/chi"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/uber/kraken/core"
 	"github.com/uber/kraken/lib/backend/backenderrors"
@@ -124,4 +126,61 @@ func TestBlobDownloadFileNotFound(t *testing.T) {
 
 	var b bytes.Buffer
 	require.Equal(backenderrors.ErrBlobNotFound, client.Download(namespace, "data", &b))
+}
+
+func TestBlobDownloadHeaderTimeout(t *testing.T) {
+	require := require.New(t)
+
+	blob := randutil.Blob(32 * memsize.KB)
+	namespace := core.NamespaceFixture()
+
+	r := chi.NewRouter()
+	r.Get(fmt.Sprintf("/v2/%s/blobs/{blob}", namespace), func(w http.ResponseWriter, req *http.Request) {
+		time.Sleep(time.Second)
+		_, err := io.Copy(w, bytes.NewReader(blob))
+		require.NoError(err)
+	})
+	r.Head(fmt.Sprintf("/v2/%s/blobs/{blob}", namespace), func(w http.ResponseWriter, req *http.Request) {
+		time.Sleep(time.Second)
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(blob)))
+	})
+	addr, stop := testutil.StartServer(r)
+	defer stop()
+
+	config := newTestConfig(addr)
+	config.ResponseHeaderTimeout = 100 * time.Millisecond
+	client, err := NewBlobClient(config)
+	require.NoError(err)
+
+	_, err = client.Stat(namespace, "data")
+	if assert.NotNil(t, err) {
+		assert.Contains(t, err.Error(), "timeout awaiting response headers")
+	}
+
+	var b bytes.Buffer
+	err = client.Download(namespace, "data", &b)
+	if assert.NotNil(t, err) {
+		assert.Contains(t, err.Error(), "timeout awaiting response headers")
+	}
+}
+
+func TestBlobDownloadConnectTimeout(t *testing.T) {
+	require := require.New(t)
+
+	// unroutable address, courtesy of https://stackoverflow.com/a/904609/4867444
+	config := newTestConfig("10.255.255.1")
+	config.ConnectTimeout = 100 * time.Millisecond
+	client, err := NewBlobClient(config)
+	require.NoError(err)
+
+	_, err = client.Stat("dummynamespace", "data")
+	if assert.NotNil(t, err) {
+		assert.Contains(t, err.Error(), "i/o timeout")
+	}
+
+	var b bytes.Buffer
+	err = client.Download("dummynamespace", "data", &b)
+	if assert.NotNil(t, err) {
+		assert.Contains(t, err.Error(), "i/o timeout")
+	}
 }
